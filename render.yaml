@@ -26,7 +26,7 @@ services:
     name: progettochiaro-client
     runtime: static
     rootDir: client
-    buildCommand: corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm build
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
     staticPublishPath: ./dist
     routes:
       - type: rewrite
