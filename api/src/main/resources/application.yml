@@ -12,6 +12,10 @@ spring:
     url: ${JDBC_DATABASE_URL:jdbc:h2:mem:progettochiaro;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1}
     username: ${JDBC_DATABASE_USERNAME:sa}
     password: ${JDBC_DATABASE_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${APP_DB_POOL_MAX:3}
+      minimum-idle: 0
+      idle-timeout: 60000
   jpa:
     hibernate:
       ddl-auto: validate
