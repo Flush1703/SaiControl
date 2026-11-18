@@ -1,0 +1,14 @@
+.DS_Store
+.idea/
+*.iml
+.env
+.env.*
+!.env.example
+target/
+api/target/
+client/node_modules/
+client/dist/
+*.log
+
+
+*.tsbuildinfo
