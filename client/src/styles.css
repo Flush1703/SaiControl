@@ -140,3 +140,7 @@ label.checkbox { display: flex; align-items: center; gap: 8px; }
   .project-dashboard:has(.receipt-print) > :not(.project-workspace),
   .project-workspace:has(.receipt-print) > :not(.pocket-panel) { display: none; }
 }
+
+.project-directory .card-title { gap: 14px; margin-bottom: 18px; }
+.project-directory .card-title p { margin-bottom: 0; }
+.project-directory .wizard-actions { gap: 12px; }
