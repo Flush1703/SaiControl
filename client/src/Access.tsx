@@ -13,6 +13,7 @@ export default function Access({ apiUrl, onLogin }: { apiUrl: string; onLogin: (
     try {
       const response = await fetch(`${apiUrl}/api/v1/access`, {
         method: "POST",
+        signal: AbortSignal.timeout(45_000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(credentials),
       });
@@ -21,7 +22,11 @@ export default function Access({ apiUrl, onLogin }: { apiUrl: string; onLogin: (
       if (!response.ok) throw new Error("Accesso temporaneamente indisponibile.");
       onLogin((await response.json()).token);
     } catch (cause) {
-      setError(cause instanceof TypeError ? "Impossibile raggiungere il servizio. Riprova." : (cause as Error).message);
+      if (cause instanceof DOMException && cause.name === "TimeoutError") {
+        setError("L’API non ha risposto entro 45 secondi. Se il servizio Render si sta avviando, attendi e riprova.");
+      } else {
+        setError(cause instanceof TypeError ? "Impossibile raggiungere l’API di SaiControl. Riprova." : (cause as Error).message);
+      }
     } finally {
       setBusy(false);
     }
