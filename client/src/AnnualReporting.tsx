@@ -1,10 +1,14 @@
 import { FormEvent, useState } from "react";
+import FinalStatement from "./FinalStatement";
+import type { StatementAccount } from "./statementTotals";
 import { checked, download, type RequestApi } from "./Ledger";
 
 type Preview = {
   summary: { shares: number; allocated: number; not_settled: number; pending: number };
   previousYearCandidates: { id: string; invoice_number: string | null; invoice_date: string; payment_date: string }[];
   ordinaryDeadline: string;
+  accounts: StatementAccount[];
+  project: { name: string; reference_code?: string | null };
 };
 const eur = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
 const date = (value: string) => value.split("-").reverse().join("/");
@@ -45,6 +49,7 @@ export default function AnnualReporting({ base, request }: { base: string; reque
         <div><dt>Quote da verificare</dt><dd>{data.summary.pending} di {data.summary.shares}</dd></div>
         <div><dt>Fatture con saldo aperto</dt><dd>{data.summary.not_settled}</dd></div>
       </dl>
+      <FinalStatement accounts={data.accounts} project={data.project} year={year} />
       <h3>Preparazione SAL</h3>
       <p>Il CSV riepiloga le quote per data fattura nel primo semestre. Controlla separatamente la competenza e la liquidazione delle spese di esercizi precedenti.</p>
       {data.previousYearCandidates.length > 0 && <ul>{data.previousYearCandidates.map((item) =>

@@ -46,7 +46,16 @@ public class AnnualReportingController {
             and d.invoice_date < ? and d.payment_date between ? and ?
         order by d.payment_date, d.id
         """, project, LocalDate.of(year, 1, 1), LocalDate.of(year, 1, 1), LocalDate.of(year, 6, 30));
-    return Map.of("summary", rows, "previousYearCandidates", firstSemester,
+    var accounts = jdbc.queryForList("""
+        select a.account_code, a.description, coalesce(sum(r.share_amount), 0) as reported
+        from financial_accounts a left join (
+        """ + REGISTER.replace("select a.account_code,", "select a.id as account_id, a.account_code,") + """
+         and s.reporting = 'RENDICONTATO'
+        ) r on r.account_id = a.id
+        where a.project_id = ? group by a.id, a.account_code, a.description order by a.account_code
+        """, project, LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31), project);
+    var header = jdbc.queryForMap("select name, reference_code from projects where id = ?", project);
+    return Map.of("summary", rows, "previousYearCandidates", firstSemester, "accounts", accounts, "project", header,
         "ordinaryDeadline", LocalDate.of(year + 1, 5, 31));
   }
 

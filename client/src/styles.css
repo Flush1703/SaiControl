@@ -114,3 +114,29 @@ label.checkbox { display: flex; align-items: center; gap: 8px; }
 @media (min-width: 901px) {
   .pocket-form { grid-template-columns: 2fr repeat(4, minmax(0, 1fr)) auto; }
 }
+
+.statement td:last-child, .statement thead th:last-child { text-align: right; white-space: nowrap; }
+.statement-subtotal { background: #eef5fa; font-weight: 750; }
+@media print {
+  body:has(.statement) .shell > :not(:has(.statement)),
+  body:has(.statement) .shell > section:has(.statement) > :not(:has(.statement)),
+  body:has(.statement) .planning:has(.statement) > :not(.statement),
+  .statement-print { display: none; }
+  .statement .table-wrap { overflow: visible; }
+  .statement tr { break-inside: avoid; }
+  .statement thead { display: table-header-group; }
+}
+
+.project-dashboard { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2.3fr); gap: 18px; align-items: start; }
+.project-directory .card-title { flex-direction: column; }
+.project-workspace { min-width: 0; }
+.project-status { color: #174b64; background: #e8eff8; border-radius: 6px; padding: 5px 8px; white-space: nowrap; }
+.project-overview { margin-bottom: 0; }
+.dashboard-panel > summary { cursor: pointer; font-weight: 750; color: #1b3257; }
+.dashboard-panel > section.card { padding: 0; border: 0; box-shadow: none; }
+@media (max-width: 760px) { .project-dashboard { grid-template-columns: 1fr; } }
+@media print {
+  .shell:has(.receipt-print) > .project-dashboard { display: block; }
+  .project-dashboard:has(.receipt-print) > :not(.project-workspace),
+  .project-workspace:has(.receipt-print) > :not(.pocket-panel) { display: none; }
+}

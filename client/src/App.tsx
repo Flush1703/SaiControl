@@ -1,5 +1,6 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
+import { planOverview, projectMetadata, projectStatus } from "./projectDashboard";
 import { createProjectReads } from "./projectReads";
 import { groupSaiAccounts } from "./saiBudget";
 import Access from "./Access";
@@ -60,7 +61,7 @@ export default function App() {
 
 function Workspace({ token, onLogout }: { token: string; onLogout: () => void }) {
   const [reads] = useState(createProjectReads);
-  const [pocketProject, setPocketProject] = useState<string>();
+  const [openPanel, setOpenPanel] = useState<"planning" | "pocket">();
   const request = useCallback(async (url: string, options?: RequestInit) => {
     const headers = new Headers(options?.headers);
     headers.set("Authorization", `Bearer ${token}`);
@@ -78,9 +79,9 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
   const [route, setRoute] = useState(readRoute);
   const { tab } = route;
 
-  function navigate(view: Tab, projectId = selectedId.current, replace = false) {
+  function navigate(view: Tab, projectId = selected?.id, replace = false) {
     const current = readRoute();
-    if (!replace && view === current.tab && projectId === (current.projectId ?? selectedId.current)) return;
+    if (!replace && view === current.tab && projectId === (current.projectId ?? selected?.id)) return;
     const url = new URL(window.location.href);
     if (view === "projects") url.searchParams.delete("view");
     else url.searchParams.set("view", view);
@@ -89,16 +90,17 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
     if (url.href === window.location.href) return;
     if (replace) window.history.replaceState(null, "", url);
     else window.history.pushState(null, "", url);
-    setRoute(readRoute());
+    applyRoute();
   }
   const [planVersion, setPlanVersion] = useState(0);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selected, setSelected] = useState<Project | null>(null);
+  const selected = projects.find((project) => project.id === route.projectId) ?? projects[0];
   const selectedId = useRef<string | undefined>(undefined);
   const accountRequest = useRef(0);
   const projectRequest = useRef(0);
-  const [accountsLoading, setAccountsLoading] = useState(false);
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountData, setAccountData] = useState<{ projectId: string; accounts: Account[]; loading: boolean }>();
+  const accounts = accountData?.projectId === selected?.id ? accountData?.accounts ?? [] : [];
+  const accountsLoading = Boolean(selected && (accountData?.projectId !== selected.id || accountData.loading));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -122,40 +124,45 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
   const refreshAccounts = async (project: Project) => {
     if (selectedId.current !== project.id) return;
     const generation = ++accountRequest.current;
-    setAccountsLoading(true);
+    setAccountData((current) => ({
+      projectId: project.id, accounts: current?.projectId === project.id ? current.accounts : [], loading: true,
+    }));
     try {
       const response = await request(`${API_URL}/api/v1/projects/${project.id}/financial-accounts`);
       if (!response.ok) throw new Error("Impossibile caricare il piano finanziario.");
       const data = (await response.json()) as Account[];
-      if (generation === accountRequest.current) setAccounts(data);
+      if (generation === accountRequest.current) setAccountData({ projectId: project.id, accounts: data, loading: false });
     } catch (cause) {
       if (generation === accountRequest.current) setError(cause instanceof Error ? cause.message : "Errore imprevisto.");
     } finally {
-      if (generation === accountRequest.current) setAccountsLoading(false);
+      if (generation === accountRequest.current) {
+        setAccountData((current) => current?.projectId === project.id ? { ...current, loading: false } : current);
+      }
     }
   };
 
-  const choose = async (project: Project) => {
-    if (selectedId.current !== project.id) { setAccounts([]); setPocketProject(undefined); }
-    selectedId.current = project.id;
-    setSelected(project);
-    await refreshAccounts(project);
-  };
+  function applyRoute() {
+    accountRequest.current++;
+    setError(null);
+    setOpenPanel(undefined);
+    setRoute(readRoute());
+  }
 
   useEffect(() => { void loadProjects(); }, []);
 
   useEffect(() => {
-    const restore = () => setRoute(readRoute());
-    window.addEventListener("popstate", restore);
-    return () => window.removeEventListener("popstate", restore);
+    window.addEventListener("popstate", applyRoute);
+    return () => window.removeEventListener("popstate", applyRoute);
   }, []);
 
   useEffect(() => {
-    const project = projects.find((item) => item.id === route.projectId) ?? projects[0];
-    if (project && selectedId.current !== project.id) void choose(project);
-  }, [projects, route.projectId]);
+    selectedId.current = selected?.id;
+    if (tab === "projects" && selected) void refreshAccounts(selected);
+    return () => { accountRequest.current++; };
+  }, [tab, route.projectId, selected?.id]);
 
   async function createProject(draft: ProjectDraft) {
+    const origin = window.location.href;
     const response = await checked(await request(`${API_URL}/api/v1/projects`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -171,12 +178,13 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
     projectRequest.current++;
     setLoading(false);
     setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
-    navigate("projects", project.id, true);
+    if (window.location.href === origin) navigate("projects", project.id, true);
   }
 
   const addAccount = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected) return;
+    const origin = window.location.href;
     const element = event.currentTarget;
     const form = new FormData(element);
     try {
@@ -190,14 +198,17 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
         }),
       });
       if (!response.ok) throw new Error("Il conto non è stato creato.");
+      if (window.location.href !== origin) return;
       await refreshAccounts(selected);
       if (selectedId.current !== selected.id) return;
       element.reset();
       setPlanVersion((value) => value + 1);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Errore imprevisto.");
+      if (window.location.href === origin) setError(cause instanceof Error ? cause.message : "Errore imprevisto.");
     }
   };
+
+  const overview = planOverview(accounts, accountsLoading);
 
   return (
     <main className="shell">
@@ -218,6 +229,7 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
         <button aria-pressed={tab === "drive"} onClick={() => navigate("drive")}>Google Drive</button>
       </nav>}
       {error && <div className="alert">{error}<button onClick={() => setError(null)}>×</button></div>}
+      <Fragment key={`${tab}:${selected?.id ?? ""}`}>
       {tab === "new-project" && <NewProject cancel={() => navigate("projects")} save={createProject} />}
       {tab === "ledger" && <Ledger api={API_URL} projects={projects} request={request} refreshProjects={loadProjects} />}
       {(tab === "dossier" || tab === "drive") && <section className="module-form">
@@ -236,8 +248,8 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
         {tab === "dossier" && selected && <Dossier key={selected.id}
           base={`${API_URL}/api/v1/projects/${selected.id}/dossier`} request={request} />}
       </section>}
-      {tab === "projects" && <>
-      <section className="card module-form" aria-labelledby="projects-title">
+      {tab === "projects" && <div className="project-dashboard">
+      <section className="card project-directory" aria-labelledby="projects-title">
         <div className="card-title">
           <div>
             <h1 id="projects-title" className="projects-title">Progetti SAI</h1>
@@ -253,25 +265,28 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
           : <div className="project-list">
             {projects.map((project) => (
               <button key={project.id} className={selected?.id === project.id ? "project active" : "project"}
-                aria-pressed={selected?.id === project.id} onClick={() => { if (selectedId.current !== project.id) navigate(tab, project.id); }}>
+                aria-pressed={selected?.id === project.id} onClick={() => { if (selected?.id !== project.id) navigate(tab, project.id); }}>
                 <strong>{project.name}</strong>
-                <span>{project.referenceCode || "Senza codice"} · {project.funder || "Ente da definire"}</span>
-                <em>{project.status}</em>
+                <span>{projectMetadata(project)}</span>
+                <em>{projectStatus(project.status)}</em>
               </button>
             ))}
           </div>}
       </section>
-      {selected && <nav className="module-nav project-flow" aria-label="Attività del progetto">
-        <button onClick={() => document.getElementById("piano-finanziario")?.scrollIntoView()}>Piano finanziario preventivo</button>
-        <button onClick={() => navigate("ledger")}>Documenti e pagamenti</button>
-        <button onClick={() => document.getElementById("situazione-contabile")?.scrollIntoView()}>Situazione contabile e rimodulazioni</button>
-        <button onClick={() => navigate("dossier")}>Fascicolo di rendicontazione</button>
-      </nav>}
-      {selected && <section className="card plan" id="piano-finanziario">
-        <div className="card-title"><div><h2>Piano finanziario preventivo</h2><p>{selected.name}</p></div>
-          <strong>{!accountsLoading || accounts.length ? euro.format(accounts.reduce((sum, account) => sum + Number(account.allocatedBudget), 0)) : "—"}</strong>
+      {selected && <div className="project-workspace">
+      <section className="card" aria-label="Progetto selezionato">
+        <div className="card-title"><div><h2>{selected.name}</h2>
+          {projectMetadata(selected) && <p>{projectMetadata(selected)}</p>}</div>
+          <small className="project-status">{projectStatus(selected.status)}</small>
         </div>
-        {!accounts.length && <p role="status">{accountsLoading ? "Caricamento del piano…" : "Nessun conto nel piano."}</p>}
+        <dl className="allocation-summary project-overview">
+          <div><dt>Budget del piano</dt><dd>{overview.total === null ? "—" : euro.format(overview.total)}</dd></div>
+          <div><dt>Conti di spesa</dt><dd>{overview.total === null ? "—" : overview.count}</dd></div>
+        </dl>
+      </section>
+      <section className="card plan" id="piano-finanziario">
+        <h2>Piano finanziario preventivo</h2>
+        {!accounts.length && <p role="status">{overview.emptyMessage}</p>}
         {groupSaiAccounts(accounts).map((group) => <section key={group.code}>
           <h3>{group.code && `${group.code} · `}{group.name}</h3>
           <div className="accounts">{group.accounts.map((account) => <div key={account.id}>
@@ -294,17 +309,27 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
             if (selectedId.current === selected.id) setPlanVersion((value) => value + 1);
             return `Importati ${result.imported} conti.`;
           }} />
-      </section>}
-      {selected && <Planning key={`${selected.id}-${planVersion}`}
-        base={`${API_URL}/api/v1/projects/${selected.id}/planning`} request={request}
-        changed={() => void refreshAccounts(selected)} />}
-      {selected && <details className="card plan pocket-panel" key={selected.id}
-        onToggle={(event) => { if (event.currentTarget.open) setPocketProject(selected.id); }}>
-        <summary>Pocket money</summary>
-        {pocketProject === selected.id && <PocketMoney key={selected.id} project={selected.name}
+      </section>
+      <details className="card plan dashboard-panel" key={`${selected.id}-planning`} open={openPanel === "planning"}>
+        <summary onClick={(event) => {
+          event.preventDefault();
+          setOpenPanel((current) => current === "planning" ? undefined : "planning");
+        }}>Situazione contabile e rimodulazioni</summary>
+        {openPanel === "planning" && <Planning key={`${selected.id}-${planVersion}`}
+          base={`${API_URL}/api/v1/projects/${selected.id}/planning`} request={request}
+          changed={() => void refreshAccounts(selected)} />}
+      </details>
+      <details className="card plan pocket-panel dashboard-panel" key={`${selected.id}-pocket`} open={openPanel === "pocket"}>
+        <summary onClick={(event) => {
+          event.preventDefault();
+          setOpenPanel((current) => current === "pocket" ? undefined : "pocket");
+        }}>Pocket money</summary>
+        {openPanel === "pocket" && <PocketMoney key={selected.id} project={selected.name}
           url={`${API_URL}/api/v1/projects/${selected.id}/pocket-money`} request={request} />}
-      </details>}
-      </>}
+      </details>
+      </div>}
+      </div>}
+      </Fragment>
     </main>
   );
 }
