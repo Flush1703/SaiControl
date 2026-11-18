@@ -14,8 +14,8 @@ const outcomes: Record<string, string> = {
 };
 const euro = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
 
-export default function InvoiceImport({ base, request, updated, showUnassigned, projects, refreshProjects }: {
-  base: string; request: RequestApi; updated: () => Promise<void>; showUnassigned: () => void;
+export default function InvoiceImport({ base, request, updated, showUnassigned, openDocument, projects, refreshProjects }: {
+  base: string; request: RequestApi; updated: () => Promise<void>; showUnassigned: () => void; openDocument: (id: string) => void;
   projects: { id: string; name: string }[]; refreshProjects: () => Promise<void>;
 }) {
   const [folder, setFolder] = useState(false);
@@ -81,7 +81,7 @@ export default function InvoiceImport({ base, request, updated, showUnassigned, 
       <label>Cerca nell’esito<input type="search" value={query} onChange={(event) => setQuery(event.target.value)}
         placeholder="Nome file, percorso, fornitore o progetto" /></label>
       <div className="table-wrap"><table><thead><tr>
-        <th>File</th><th>Fornitore</th><th>Numero</th><th>Data</th><th>Totale</th><th>Esito</th><th>Progetto / conto</th><th>Progetto nel documento</th>
+        <th>File</th><th>Fornitore</th><th>Numero</th><th>Data</th><th>Totale</th><th>Esito</th><th>Progetto / conto</th><th>Progetto nel documento</th>{completed && <th>Fattura</th>}
       </tr></thead><tbody>{report.results.filter((item) =>
         [item.path, item.filename, item.supplier, item.number, item.projectReference, item.destination]
           .some((value) => value?.toLowerCase().includes(query.trim().toLowerCase()))
@@ -98,6 +98,8 @@ export default function InvoiceImport({ base, request, updated, showUnassigned, 
             projects={projects} updated={updated} refreshProjects={refreshProjects} />}
           {review && !item.projectReference && !item.outcome.startsWith("DUPLICATO") &&
             <small>Abbinabile dopo la conferma</small>}</td>
+        {completed && <td>{item.documentId && <button type="button" className="secondary"
+          onClick={() => openDocument(item.documentId!)}>Apri fattura</button>}</td>}
       </tr>)}</tbody></table></div>
       {review && <button type="button" disabled={busy || !report.imported} onClick={() => void confirm()}>Conferma importazione</button>}
       {completed && <button type="button" className="secondary" onClick={showUnassigned}>Vai ai documenti senza quote</button>}

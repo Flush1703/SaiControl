@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { shareAmounts } from "./shareAmounts";
+import { budgetAfterShare, invoiceBalance, shareAmounts } from "./shareAmounts";
 import ManualProjectLink from "./ManualProjectLink";
 import InvoiceImport from "./InvoiceImport";
 import Reconciliation from "./Reconciliation";
@@ -8,7 +8,7 @@ import MappedImport from "./MappedImport";
 
 export type RequestApi = (url: string, options?: RequestInit) => Promise<Response>;
 type Project = { id: string; name: string };
-type Account = { id: string; accountCode: string; description: string };
+type Account = { id: string; accountCode: string; description: string; available: number };
 const statuses = ["DA_RENDICONTARE", "IN_VERIFICA", "RENDICONTATO", "ESCLUSO"];
 const payments = ["NON_SALDATO", "PARZIALMENTE_SALDATO", "SALDATO"];
 const label = (value: string) => value.charAt(0) + value.slice(1).toLowerCase().replaceAll("_", " ");
@@ -77,6 +77,7 @@ export default function Ledger({ api, projects, request, refreshProjects }: { ap
   const [project, setProject] = useState("");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [suggestion, setSuggestion] = useState<{ supplier_key: string; project_id?: string; account_id?: string; project?: string; account_code?: string }>();
+  const [shareStatus, setShareStatus] = useState("DA_RENDICONTARE");
   const [percentage, setPercentage] = useState("");
   const [accountId, setAccountId] = useState("");
   const [filters, setFilters] = useState<Filters>(defaultFilters);
@@ -101,14 +102,32 @@ export default function Ledger({ api, projects, request, refreshProjects }: { ap
       .catch((cause: Error) => setError(cause.message));
   }, [base, request]);
 
+  function openDocument(id: string) {
+    if (id !== selected) {
+      const document = documents.find((item) => item.id === id);
+      setSelected(id);
+      setPercentage("");
+      setShareStatus("DA_RENDICONTARE");
+      setProject(document?.manual_project_id ?? "");
+      setAccounts([]);
+      setAccountId("");
+      setSuggestion(undefined);
+    }
+    requestAnimationFrame(() => window.document.getElementById("invoice-detail")?.scrollIntoView());
+  }
+
   useEffect(() => {
     if (!project) return;
     let active = true;
-    request(`${api}/api/v1/projects/${project}/financial-accounts`).then(checked)
-      .then((response) => response.json()).then((items) => { if (active) setAccounts(items); })
+    request(`${api}/api/v1/projects/${project}/planning`).then(checked)
+      .then((response) => response.json()).then(({ budget }: {
+        budget: { id: string; account_code: string; description: string; available: number }[];
+      }) => {
+        if (active) setAccounts(budget.map((item) => ({ ...item, accountCode: item.account_code })));
+      })
       .catch((cause: Error) => { if (active) setError(cause.message); });
     return () => { active = false; };
-  }, [api, project, request]);
+  }, [api, project, request, documents, selected]);
 
   useEffect(() => {
     if (!entry?.supplier || entry.shares.length) return;
@@ -152,7 +171,7 @@ export default function Ledger({ api, projects, request, refreshProjects }: { ap
         setSuggestion(undefined);
       }
       if (reset) form.reset();
-      if (path.endsWith("/shares")) setPercentage("");
+      if (path.endsWith("/shares")) { setPercentage(""); setShareStatus("DA_RENDICONTARE"); }
       setMessage("Dati salvati.");
     });
   }
@@ -166,7 +185,7 @@ export default function Ledger({ api, projects, request, refreshProjects }: { ap
       <div>
         <article className="card"><h2>Importa documenti</h2>
           <p>Carica fatture elettroniche XML o XML.P7M, oppure PDF e altri allegati. Verifica i documenti con dati incompleti.</p>
-          <InvoiceImport base={base} request={request} projects={projects} refreshProjects={refreshProjects} updated={refresh} showUnassigned={() => {
+          <InvoiceImport base={base} request={request} projects={projects} refreshProjects={refreshProjects} updated={refresh} openDocument={openDocument} showUnassigned={() => {
             setFilters({ ...defaultFilters, project: "unassigned" });
             setPage(1);
             document.getElementById("invoice-archive")?.scrollIntoView({ block: "start" });
@@ -217,7 +236,7 @@ export default function Ledger({ api, projects, request, refreshProjects }: { ap
         <div className="project-list">
           {results.rows.slice((currentPage - 1) * 20, currentPage * 20)
             .map(({ document: item, cents }) => <button key={item.id} type="button" className={item.id === selected ? "project active" : "project"} aria-pressed={item.id === selected}
-              onClick={() => { setSelected(item.id); setPercentage(""); setProject(""); setAccounts([]); setAccountId(""); setSuggestion(undefined); }}>
+              onClick={() => openDocument(item.id)}>
               <strong>{item.supplier || item.files[0]?.filename || "Documento senza fornitore"} {item.invoice_number && `· ${item.invoice_number}`}</strong>
               <span>{item.invoice_date || "Data assente"} · {label(item.payment_status)}{!item.identity_hash && !item.reviewed && " · Verifica duplicati"}</span>
               <span>{item.manual_project_name && `Progetto associato: ${item.manual_project_name} · `}{item.project_reference && `Riferimento in fattura: ${item.project_reference} · `}{[...new Set(item.shares.map((share) => share.project))].join(", ") || "Senza quote"}</span>
@@ -230,7 +249,7 @@ export default function Ledger({ api, projects, request, refreshProjects }: { ap
           <button type="button" className="secondary" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>Successiva</button>
         </nav>}
       </article>
-      {entry && <article className="card module-form" key={entry.id}>
+      {entry && <article id="invoice-detail" className="card module-form" key={entry.id}>
         <h2>Dettaglio documento</h2>
         {(!entry.project_reference || !entry.manual_project_id) && <ManualProjectLink key={`${entry.id}:${entry.manual_project_id ?? ""}`}
           base={base} request={request} documentId={entry.id} current={entry.manual_project_id}
@@ -244,18 +263,26 @@ export default function Ledger({ api, projects, request, refreshProjects }: { ap
           <button>Salva dati</button>
         </form>
         <h3>Pagamento e rendicontazione</h3>
-        <form className="filter-bar" onSubmit={(event) => {
+        <p>{label(entry.payment_status)} · Pagato {euro.format(entry.paid)}
+          {entry.total !== null && ` · Da pagare ${euro.format(invoiceBalance(entry.total, entry.paid))}`}</p>
+        <form key={`${entry.paid}:${entry.payment_date}:${entry.reporting}`} className="filter-bar" onSubmit={(event) => {
           const form = new FormData(event.currentTarget);
           submit(event, `/${entry.id}/payment`, json("PUT", {
             paid: form.get("paid"), date: form.get("date") || null, reporting: form.get("reporting"),
           }));
         }}>
-          <label>Importo pagato (€)<input name="paid" type="number" min="0" step=".01" required defaultValue={entry.paid} /></label>
+          <label>Importo pagato (€)<input name="paid" type="number" min="0" max={entry.total ?? undefined} step=".01" required defaultValue={entry.paid} /></label>
           <label>Data pagamento<input name="date" type="date" defaultValue={entry.payment_date ?? ""} /></label>
           <label>Rendicontazione documento<select name="reporting" defaultValue={entry.reporting}><Options values={statuses} /></select></label>
           <button>Salva pagamento</button>
+          {entry.total !== null && entry.paid < entry.total && <button type="button" className="secondary" onClick={(event) => {
+            const field = event.currentTarget.form?.elements.namedItem("paid");
+            if (field instanceof HTMLInputElement) field.value = String(entry.total);
+            const date = event.currentTarget.form?.elements.namedItem("date");
+            if (date instanceof HTMLInputElement) date.focus();
+          }}>Imposta saldo totale</button>}
         </form>
-        <h3>Quote</h3>
+        <h3>Imputazione al codice di spesa</h3>
         {suggestion && !entry.shares.length && <p className="notice">Regola fornitore: {suggestion.project} · {suggestion.account_code}{" "}
           <button type="button" className="secondary" onClick={() => {
             if (project !== suggestion.project_id) setAccounts([]);
@@ -291,16 +318,22 @@ export default function Ledger({ api, projects, request, refreshProjects }: { ap
             <option value="">Seleziona progetto</option>
             {projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select></label>
-          <label>Conto<select name="account" required disabled={!accounts.length} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+          <label>Codice di spesa<select name="account" required disabled={!accounts.length} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
             <option value="">Seleziona conto</option>
-            {accounts.map((item) => <option key={item.id} value={item.id}>{item.accountCode} · {item.description}</option>)}
+            {accounts.map((item) => <option key={item.id} value={item.id}>{item.accountCode} · {item.description} · Residuo {euro.format(item.available)}</option>)}
           </select></label>
           <label>Percentuale<input name="percentage" type="number" min=".0001" max="100" step=".0001" required value={percentage} onChange={(event) => setPercentage(event.target.value)} /></label>
-          <label>Rendicontazione quota<select name="reporting"><Options values={statuses} /></select></label>
+          <label>Rendicontazione quota<select name="reporting" value={shareStatus} onChange={(event) => setShareStatus(event.target.value)}><Options values={statuses} /></select></label>
           <button disabled={!accounts.length || !allocation || allocation.exceeds}>Aggiungi quota</button>
           {allocation?.preview != null && <span role="status" className={allocation.exceeds ? "negative" : ""}>
             {allocation.exceeds ? "La quota supera l’importo o la percentuale disponibile." : `Importo della quota: ${euro.format(allocation.preview / 100)}`}
           </span>}
+          {allocation?.preview != null && !allocation.exceeds && accounts.filter((item) => item.id === accountId).map((item) => {
+            const after = budgetAfterShare(item.available, allocation.preview!, shareStatus);
+            return <span key={item.id} role="status" className={after < 0 ? "negative" : ""}>
+              Residuo del conto dopo l’imputazione: {euro.format(after)}{after < 0 && " · fuori budget"}
+            </span>;
+          })}
         </form>
       </article>}
       <article className="card module-form">

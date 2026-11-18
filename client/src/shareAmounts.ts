@@ -15,3 +15,11 @@ export function shareAmounts(total: number, shares: { amount: number; percentage
   return { assigned, remaining, remainingPercent, preview,
     exceeds: preview !== null && (units + proposedUnits > wholePercent || preview > remaining) };
 }
+
+export function invoiceBalance(total: number, paid: number) {
+  return (Math.round(total * 100) - Math.round(paid * 100)) / 100;
+}
+
+export function budgetAfterShare(available: number, shareCents: number, status: string) {
+  return (Math.round(available * 100) - (status === "ESCLUSO" ? 0 : shareCents)) / 100;
+}
