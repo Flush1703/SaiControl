@@ -28,11 +28,11 @@ public class PocketMoneyController {
   @GetMapping
   public List<Receipt> list(@PathVariable UUID projectId) {
     return jdbc.query("""
-        select id, beneficiary, start_date, end_date, daily_rate from pocket_money
+        select id, beneficiary, start_date, end_date, daily_rate, absent_days from pocket_money
         where project_id = ? order by start_date desc, beneficiary
         """, (row, index) -> receipt(row.getObject("id", UUID.class), new Calculation(
         row.getString("beneficiary"), row.getObject("start_date", LocalDate.class),
-        row.getObject("end_date", LocalDate.class), row.getBigDecimal("daily_rate"))), projectId);
+        row.getObject("end_date", LocalDate.class), row.getBigDecimal("daily_rate"), row.getInt("absent_days"))), projectId);
   }
 
   @PostMapping
@@ -41,11 +41,14 @@ public class PocketMoneyController {
     if (calculation.end().isBefore(calculation.start())) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Periodo non valido");
     }
+    if (calculation.absences() > ChronoUnit.DAYS.between(calculation.start(), calculation.end()) + 1) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Le assenze superano i giorni del periodo.");
+    }
     UUID id = UUID.randomUUID();
     int inserted = jdbc.update("""
-        insert into pocket_money (id, project_id, beneficiary, start_date, end_date, daily_rate)
-        select ?, id, ?, ?, ?, ? from projects where id = ?
-        """, id, calculation.beneficiary().strip(), calculation.start(), calculation.end(), calculation.dailyRate(), projectId);
+        insert into pocket_money (id, project_id, beneficiary, start_date, end_date, daily_rate, absent_days)
+        select ?, id, ?, ?, ?, ?, ? from projects where id = ?
+        """, id, calculation.beneficiary().strip(), calculation.start(), calculation.end(), calculation.dailyRate(), calculation.absences(), projectId);
     if (inserted == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
     return receipt(id, calculation);
   }
@@ -84,7 +87,7 @@ public class PocketMoneyController {
   }
 
   private Receipt receipt(UUID id, Calculation calculation) {
-    long days = ChronoUnit.DAYS.between(calculation.start(), calculation.end()) + 1;
+    long days = ChronoUnit.DAYS.between(calculation.start(), calculation.end()) + 1 - calculation.absences();
     var attachments = jdbc.query("""
         select id, filename from pocket_money_attachments where receipt_id = ? order by filename, id
         """, (row, index) -> new Attachment(row.getObject("id", UUID.class), row.getString("filename")), id);
@@ -93,7 +96,9 @@ public class PocketMoneyController {
 
   public record Calculation(@NotBlank @Size(max = 200) String beneficiary, @NotNull LocalDate start,
                             @NotNull LocalDate end, @NotNull @DecimalMin("0")
-                            @Digits(integer = 10, fraction = 2) BigDecimal dailyRate) {}
+                            @Digits(integer = 10, fraction = 2) BigDecimal dailyRate, @PositiveOrZero Integer absentDays) {
+    int absences() { return absentDays == null ? 0 : absentDays; }
+  }
   public record Receipt(UUID id, Calculation calculation, long days, BigDecimal amount,
                         List<Attachment> attachments) {}
   public record Attachment(UUID id, String filename) {}

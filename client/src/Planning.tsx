@@ -55,7 +55,7 @@ export default function Planning({ base, request, changed }: { base: string; req
   const total = (key: "allocated_budget" | "allocated" | "paid" | "unpaid" | "available") =>
     eur.format((data?.budget.reduce((sum, account) => sum + Math.round(account[key] * 100), 0) ?? 0) / 100);
 
-  return <section className="card plan planning">
+  return <section className="card plan planning" id="situazione-contabile">
     <h2>Monitoraggio budget e pianificazione</h2>
     {error && <div className="alert" role="alert">{error}</div>}
     {!data && !error && <p>Caricamento…</p>}

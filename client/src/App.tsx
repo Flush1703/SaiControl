@@ -1,10 +1,14 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
+import { createProjectReads } from "./projectReads";
+import { groupSaiAccounts } from "./saiBudget";
 import Access from "./Access";
 import PocketMoney from "./PocketMoney";
 import Ledger, { checked } from "./Ledger";
 import Planning from "./Planning";
 import ProjectDrive, { createDriveSessions } from "./ProjectDrive";
+import AnnualReporting from "./AnnualReporting";
+import SaiChecklist from "./SaiChecklist";
 import Dossier from "./Dossier";
 import NewProject, { type ProjectDraft } from "./NewProject";
 import MappedImport from "./MappedImport";
@@ -55,13 +59,20 @@ export default function App() {
 }
 
 function Workspace({ token, onLogout }: { token: string; onLogout: () => void }) {
+  const [reads] = useState(createProjectReads);
+  const [pocketProject, setPocketProject] = useState<string>();
   const request = useCallback(async (url: string, options?: RequestInit) => {
     const headers = new Headers(options?.headers);
     headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(url, { ...options, headers });
+    const method = options?.method ?? "GET";
+    const load = () => fetch(url, { ...options, headers });
+    const response = method === "GET" && /\/projects\/[^/]+\/(financial-accounts|planning|pocket-money)$/.test(url)
+      ? await reads.read(url, load)
+      : await load();
+    if (method !== "GET" && response.ok) reads.clear();
     if (response.status === 401) onLogout();
     return response;
-  }, [token, onLogout]);
+  }, [token, onLogout, reads]);
 
   const [driveSessions] = useState(createDriveSessions);
   const [route, setRoute] = useState(readRoute);
@@ -86,6 +97,7 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
   const selectedId = useRef<string | undefined>(undefined);
   const accountRequest = useRef(0);
   const projectRequest = useRef(0);
+  const [accountsLoading, setAccountsLoading] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,18 +122,21 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
   const refreshAccounts = async (project: Project) => {
     if (selectedId.current !== project.id) return;
     const generation = ++accountRequest.current;
+    setAccountsLoading(true);
     try {
       const response = await request(`${API_URL}/api/v1/projects/${project.id}/financial-accounts`);
       if (!response.ok) throw new Error("Impossibile caricare il piano finanziario.");
       const data = (await response.json()) as Account[];
       if (generation === accountRequest.current) setAccounts(data);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Errore imprevisto.");
+      if (generation === accountRequest.current) setError(cause instanceof Error ? cause.message : "Errore imprevisto.");
+    } finally {
+      if (generation === accountRequest.current) setAccountsLoading(false);
     }
   };
 
   const choose = async (project: Project) => {
-    if (selectedId.current !== project.id) setAccounts([]);
+    if (selectedId.current !== project.id) { setAccounts([]); setPocketProject(undefined); }
     selectedId.current = project.id;
     setSelected(project);
     await refreshAccounts(project);
@@ -214,6 +229,10 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
           {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
         </select></label>
         {tab === "drive" && selected && <ProjectDrive key={selected.id} project={selected} sessions={driveSessions} />}
+        {tab === "dossier" && selected && <AnnualReporting key={selected.id}
+          base={`${API_URL}/api/v1/projects/${selected.id}/annual-report`} request={request} />}
+        {tab === "dossier" && selected && <SaiChecklist key={selected.id}
+          base={`${API_URL}/api/v1/projects/${selected.id}/reporting-checklist`} request={request} />}
         {tab === "dossier" && selected && <Dossier key={selected.id}
           base={`${API_URL}/api/v1/projects/${selected.id}/dossier`} request={request} />}
       </section>}
@@ -225,7 +244,7 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
             <p>{loading ? "Caricamento…" : `${projects.length} ${projects.length === 1 ? "progetto registrato" : "progetti registrati"}`}</p>
           </div>
           <div className="wizard-actions">
-            <button className="secondary" disabled={loading} onClick={() => void loadProjects()}>Aggiorna</button>
+            <button className="secondary" disabled={loading} onClick={() => { reads.clear(); void loadProjects(); if (selected) { void refreshAccounts(selected); setPlanVersion((value) => value + 1); } }}>Aggiorna</button>
             <button onClick={() => { setError(null); navigate("new-project"); }}>Nuovo progetto</button>
           </div>
         </div>
@@ -242,7 +261,31 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
             ))}
           </div>}
       </section>
-      {selected && <section className="card plan"><div className="card-title"><div><p className="eyebrow">PIANO FINANZIARIO</p><h2>{selected.name}</h2></div><strong>{euro.format(accounts.reduce((sum, account) => sum + Number(account.allocatedBudget), 0))}</strong></div><div className="accounts">{accounts.length ? accounts.map((account) => <div key={account.id}><code>{account.accountCode}</code><span>{account.description}</span><strong>{euro.format(account.allocatedBudget)}</strong></div>) : <div className="empty">Nessun conto: aggiungi la prima voce di budget.</div>}</div><form className="account-form" onSubmit={addAccount}><input required name="accountCode" placeholder="Codice conto" /><input required name="description" placeholder="Descrizione" /><input required min="0" step="0.01" name="allocatedBudget" type="number" placeholder="Budget" /><button>Aggiungi conto</button></form>
+      {selected && <nav className="module-nav project-flow" aria-label="Attività del progetto">
+        <button onClick={() => document.getElementById("piano-finanziario")?.scrollIntoView()}>Piano finanziario preventivo</button>
+        <button onClick={() => navigate("ledger")}>Documenti e pagamenti</button>
+        <button onClick={() => document.getElementById("situazione-contabile")?.scrollIntoView()}>Situazione contabile e rimodulazioni</button>
+        <button onClick={() => navigate("dossier")}>Fascicolo di rendicontazione</button>
+      </nav>}
+      {selected && <section className="card plan" id="piano-finanziario">
+        <div className="card-title"><div><h2>Piano finanziario preventivo</h2><p>{selected.name}</p></div>
+          <strong>{!accountsLoading || accounts.length ? euro.format(accounts.reduce((sum, account) => sum + Number(account.allocatedBudget), 0)) : "—"}</strong>
+        </div>
+        {!accounts.length && <p role="status">{accountsLoading ? "Caricamento del piano…" : "Nessun conto nel piano."}</p>}
+        {groupSaiAccounts(accounts).map((group) => <section key={group.code}>
+          <h3>{group.code && `${group.code} · `}{group.name}</h3>
+          <div className="accounts">{group.accounts.map((account) => <div key={account.id}>
+            <code>{account.accountCode}</code><span>{account.description}</span><strong>{euro.format(account.allocatedBudget)}</strong>
+          </div>)}</div>
+        </section>)}
+        <details><summary>Aggiungi un conto manualmente</summary>
+          <form className="account-form module-form" onSubmit={addAccount}>
+            <label>Codice conto<input required name="accountCode" /></label>
+            <label>Descrizione<input required name="description" /></label>
+            <label>Budget (€)<input required min="0" step="0.01" name="allocatedBudget" type="number" /></label>
+            <button>Aggiungi conto</button>
+          </form>
+        </details>
         <MappedImport key={selected.id} api={API_URL} request={request} title="Piano finanziario XLSX, XLSM o CSV"
           fields={["codice di conto", "descrizione", "budget"]} onImport={async (body) => {
             const response = await checked(await request(`${API_URL}/api/v1/projects/${selected.id}/financial-accounts/import`, { method: "POST", body }));
@@ -255,8 +298,12 @@ function Workspace({ token, onLogout }: { token: string; onLogout: () => void })
       {selected && <Planning key={`${selected.id}-${planVersion}`}
         base={`${API_URL}/api/v1/projects/${selected.id}/planning`} request={request}
         changed={() => void refreshAccounts(selected)} />}
-      {selected && <PocketMoney key={selected.id} project={selected.name}
-        url={`${API_URL}/api/v1/projects/${selected.id}/pocket-money`} request={request} />}
+      {selected && <details className="card plan pocket-panel" key={selected.id}
+        onToggle={(event) => { if (event.currentTarget.open) setPocketProject(selected.id); }}>
+        <summary>Pocket money</summary>
+        {pocketProject === selected.id && <PocketMoney key={selected.id} project={selected.name}
+          url={`${API_URL}/api/v1/projects/${selected.id}/pocket-money`} request={request} />}
+      </details>}
       </>}
     </main>
   );

@@ -31,6 +31,17 @@ class LedgerFlowTest {
         Map.of("username", "operatore", "password", "password-di-test"))
         .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).get("token").asText();
     String project = id(call(post("/api/v1/projects"), Map.of("name", "SAI Palermo")).andExpect(status().isCreated()));
+    String checklist = "/api/v1/projects/" + project + "/reporting-checklist/";
+    call(put(checklist + "2026"), Map.of("code", "all-11", "status", "NON_APPLICABILE", "notes", ""))
+        .andExpect(status().isBadRequest());
+    call(put(checklist + "2026"), Map.of("code", "all-11", "status", "NON_APPLICABILE", "notes", "Spese quietanzate"))
+        .andExpect(status().isNoContent());
+    call(put(checklist + "2026"), Map.of("code", "all-11", "status", "VERIFICATO", "notes", "Controllato"))
+        .andExpect(status().isNoContent());
+    call(get(checklist + "2026"), null).andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(1))
+        .andExpect(jsonPath("$[0].status").value("VERIFICATO"));
+    call(get(checklist + "2025"), null).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
     String accounts = "/api/v1/projects/" + project + "/financial-accounts";
     csv(accounts + "/import", "codice di conto;descrizione;budget\n001;Ufficio;1000\n002;Servizi;400\n")
         .andExpect(status().isOk()).andExpect(jsonPath("$.imported").value(2));
@@ -134,6 +145,16 @@ class LedgerFlowTest {
         .andExpect(jsonPath("$.budget[0].paid").value(60))
         .andExpect(jsonPath("$.budget[0].unpaid").value(100))
         .andExpect(jsonPath("$.staff[0].estimate").value(500));
+    String annual = "/api/v1/projects/" + project + "/annual-report/2026";
+    call(get(annual), null).andExpect(status().isOk())
+        .andExpect(jsonPath("$.summary.allocated").value(160))
+        .andExpect(jsonPath("$.ordinaryDeadline").value("2027-05-31"));
+    call(get(annual + "/csv").param("type", "register"), null).andExpect(status().isOk())
+        .andExpect(content().string(containsString("F1")));
+    call(get(annual + "/csv").param("type", "unsettled"), null).andExpect(status().isOk())
+        .andExpect(content().string(containsString("F2")));
+    call(get(annual + "/csv").param("type", "sal"), null).andExpect(status().isOk())
+        .andExpect(content().string(containsString("primo semestre")));
     String newProjectXml = invoiceXml.replace("SAI PALERMO", "SAI SCIGLIANO")
         .replace("<Numero>F1</Numero>", "<Numero>SC1</Numero>");
     file(LEDGER + "/files/preview", "files", "scigliano.xml", newProjectXml)

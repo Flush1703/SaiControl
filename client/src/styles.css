@@ -56,8 +56,8 @@
 @media print {
   body:has(.receipt-print) { background: white; color: black; }
   .shell:has(.receipt-print) { width: 100%; margin: 0; padding: 0; }
-  .shell:has(.receipt-print) > :not(.pocket), .pocket:has(.receipt-print) > :not(.receipt-print) { display: none; }
-  .pocket:has(.receipt-print) { padding: 0; margin: 0; border: 0; box-shadow: none; }
+  .shell:has(.receipt-print) > :not(.pocket-panel), .pocket-panel:has(.receipt-print) > summary, .pocket:has(.receipt-print) > :not(.receipt-print) { display: none; }
+  .pocket-panel:has(.receipt-print), .pocket:has(.receipt-print) { padding: 0; margin: 0; border: 0; box-shadow: none; }
   .receipt-print { display: block; padding: 12mm; }
   .receipt-print p { color: black; font-size: 12pt; margin-bottom: 6mm; }
 }
@@ -110,3 +110,7 @@ label.checkbox { display: flex; align-items: center; gap: 8px; }
 .allocation-summary > div { padding: 12px; border-radius: 8px; background: #f2f6fc; }
 .allocation-summary dt { color: #405472; font-size: 13px; }
 .allocation-summary dd { margin: 5px 0 0; font-weight: 750; }
+
+@media (min-width: 901px) {
+  .pocket-form { grid-template-columns: 2fr repeat(4, minmax(0, 1fr)) auto; }
+}

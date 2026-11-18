@@ -3,7 +3,7 @@ import { FormEvent, useEffect, useState } from "react";
 type Attachment = { id: string; filename: string };
 type Receipt = {
   id: string;
-  calculation: { beneficiary: string; start: string; end: string; dailyRate: number };
+  calculation: { beneficiary: string; start: string; end: string; dailyRate: number; absentDays?: number };
   days: number;
   amount: number;
   attachments: Attachment[];
@@ -48,13 +48,18 @@ export default function PocketMoney({ url, project, request }: {
       setError("La data finale deve essere uguale o successiva alla data iniziale.");
       return;
     }
+    const days = (Date.parse(String(values.end)) - Date.parse(String(values.start))) / 86_400_000 + 1;
+    if (Number(values.absentDays) > days) {
+      setError("I giorni di assenza superano la durata del periodo.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
       const response = await request(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
+        body: JSON.stringify({ ...values, absentDays: Number(values.absentDays) }),
       });
       if (!response.ok) throw new Error();
       const receipt = await response.json();
@@ -107,6 +112,7 @@ export default function PocketMoney({ url, project, request }: {
       <label>Beneficiario<input name="beneficiary" required maxLength={200} /></label>
       <label>Dal<input type="date" name="start" required /></label>
       <label>Al<input type="date" name="end" required /></label>
+      <label>Giorni di assenza non pagabili<input type="number" name="absentDays" min="0" step="1" defaultValue="0" required /></label>
       <label>Tariffa giornaliera (€)<input type="number" name="dailyRate" min="0" step=".01" required /></label>
       <button disabled={saving}>Calcola e salva</button>
     </form>
@@ -129,7 +135,8 @@ export default function PocketMoney({ url, project, request }: {
       <p>Progetto SAI: {project}</p>
       <p>Beneficiario: {printing.calculation.beneficiary}</p>
       <p>Periodo: dal {date(printing.calculation.start)} al {date(printing.calculation.end)}</p>
-      <p>Giorni riconosciuti: {printing.days}</p>
+      <p>Giorni di assenza non pagabili: {printing.calculation.absentDays ?? 0}</p>
+      <p>Giorni di presenza riconosciuti: {printing.days}</p>
       <p>Tariffa giornaliera: {currency.format(printing.calculation.dailyRate)}</p>
       <p><strong>Importo ricevuto: {currency.format(printing.amount)}</strong></p>
       <p>Data di erogazione ____________________</p>

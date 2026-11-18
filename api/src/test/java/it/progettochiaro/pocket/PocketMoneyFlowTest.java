@@ -38,6 +38,10 @@ class PocketMoneyFlowTest {
             {"name":"SAI Test"}
             """)).andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
     String receipts = projects + "/" + json.readTree(project).get("id").asText() + "/pocket-money";
+    mvc.perform(post(receipts).header("Authorization", authorization)
+        .contentType(MediaType.APPLICATION_JSON).content("""
+            {"beneficiary":"Prova","start":"2026-11-01","end":"2026-11-03","dailyRate":2.50,"absentDays":4}
+            """)).andExpect(status().isBadRequest());
     String receipt = mvc.perform(post(receipts).header("Authorization", authorization)
         .contentType(MediaType.APPLICATION_JSON).content("""
             {"beneficiary":"Mario Rossi","start":"2026-11-01","end":"2026-11-03","dailyRate":2.50}
@@ -55,6 +59,11 @@ class PocketMoneyFlowTest {
         .andExpect(status().isOk()).andExpect(jsonPath("$[0].attachments[0].filename").value("ricevuta.pdf"));
     mvc.perform(get(download).header("Authorization", authorization))
         .andExpect(status().isOk()).andExpect(content().bytes(contents));
+    mvc.perform(post(receipts).header("Authorization", authorization)
+        .contentType(MediaType.APPLICATION_JSON).content("""
+            {"beneficiary":"Prova","start":"2026-11-01","end":"2026-11-03","dailyRate":2.50,"absentDays":1}
+            """)).andExpect(status().isCreated()).andExpect(jsonPath("$.days").value(2))
+        .andExpect(jsonPath("$.amount").value(5));
     mvc.perform(delete(access).header("Authorization", authorization)).andExpect(status().isNoContent());
     mvc.perform(get(download).header("Authorization", authorization)).andExpect(status().isUnauthorized());
   }
